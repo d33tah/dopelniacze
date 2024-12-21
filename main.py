@@ -1,24 +1,45 @@
 # Przepisz mi to na Fleta
 
-import flet as ft
 import random
 import json
+import sqlite3
+import datetime
+
+import flet as ft
 
 # Załaduj dane do pamięci
 with open('dopelniacze.json', 'r', encoding='utf-8') as f:
     data = [json.loads(line) for line in f]
 
 class DopelniaczeApp(ft.UserControl):
-    def __init__(self):
+
+    def __init__(self, page):
         super().__init__()
+
+        self.error_message = ft.Text()
+
+        try:
+            self.db, self.score, self.num_questions = self.connect_db()
+        except Exception as e:
+            self.error_message.value = f'Wystąpił błąd: {e}'
+            self.db = None
+            self.score = 0
+            self.num_questions = 0
+
+        self.page = page
         self.title = ft.Text()
+        self.wiktionary_button = ft.ElevatedButton("Otwórz w Wikisłowniku", on_click=self.open_wiktionary)
+
+        # make title and wiktionary_button next to each other
+        self.title_and_button = ft.Row(
+            controls=[self.title, self.wiktionary_button],
+            spacing=10
+        )
 
         self.input_lp = ft.TextField(label="Nie mam żadnej/żadnego:")
         self.input_lm = ft.TextField(label="Nie mam żadnych:")
         self.result = ft.Text()
         self.btn_submit = ft.ElevatedButton("Sprawdź", on_click=self.handle_input)
-        self.score = 0
-        self.num_questions = 0
         self.score_text = ft.Text()
         self.spacer = ft.Container(height=50)
 
@@ -28,18 +49,64 @@ class DopelniaczeApp(ft.UserControl):
                 self.spacer,
                 self.score_text,
                 self.result,
-                self.title,
+                # self.title,
+                # self.wiktionary_button,
+                self.title_and_button,
                 self.input_lp,
                 self.input_lm,
                 self.btn_submit,
+                self.error_message,
             ],
             alignment=ft.MainAxisAlignment.START,
             spacing=10
         )
         self.controls.append(self.layout)
 
+    def connect_db(self):
+        conn = sqlite3.connect('dopelniacze.db')
+        conn.execute('CREATE TABLE IF NOT EXISTS attempts (timestamp TEXT, input TEXT, correct TEXT)')
+        conn.commit()
+        all_questions = conn.execute('SELECT correct FROM attempts').fetchall()
+        score = sum(1 for correct in all_questions if correct)
+        num_questions = len(all_questions)
+        return conn, score, num_questions
+
     def did_mount(self):
         self.generate_page()
+
+    def on_success(self):
+        self.result.value = 'Brawo! Odpowiedź poprawna.'
+        self.result.color = 'green'
+        self.score += 1
+
+    def on_failure(self):
+        self.result.value = (
+            f'Niestety, odpowiedź niepoprawna. Poprawna odpowiedź to:\n'
+            f'Nie mam żadnej/żadnego: {self.correct_lp!r}\n'
+            f'Nie mam żadnych: {self.correct_lm!r}\n'
+            f'Napisałeś/aś: {self.user_dopelniacz_lp!r} / {self.user_dopelniacz_lm!r}'
+        )
+        self.result.color = 'red'
+
+    @property
+    def user_dopelniacz_lp(self):
+        return self.input_lp.value
+
+    @property
+    def user_dopelniacz_lm(self):
+        return self.input_lm.value
+
+
+    def commit_attempt(self, title, success):
+        try:
+            timestamp = datetime.datetime.now().isoformat()
+            input = f'{self.input_lp.value} / {self.input_lm.value}'
+            correct = f'{self.correct_lp} / {self.correct_lm}'
+            self.db.execute('INSERT INTO attempts VALUES (?, ?, ?)', (timestamp, input, correct))
+            self.db.commit()
+        except Exception as e:
+            self.error_message.value = f'Wystąpił błąd: {e}'
+
 
     def handle_input(self, event):
         self.num_questions += 1
@@ -50,18 +117,13 @@ class DopelniaczeApp(ft.UserControl):
 
         lp_correct = not bool(correct_lp) or user_dopelniacz_lp == correct_lp
         lm_correct = not bool(correct_lm) or user_dopelniacz_lm == correct_lm
+        success = lp_correct and lm_correct
 
-        if lp_correct and lm_correct:
-            self.result.value = 'Brawo! Odpowiedź poprawna.'
-            self.result.color = 'green'
-            self.score += 1
+        if success:
+            self.on_success()
         else:
-            self.result.value = (
-                f'Niestety, odpowiedź niepoprawna. Poprawna odpowiedź to:\n'
-                f'Nie mam żadnej/żadnego: {correct_lp}\n'
-                f'Nie mam żadnych: {correct_lm}\n'
-            )
-            self.result.color = 'red'
+            self.on_failure()
+        self.commit_attempt(self.title.value, success)
 
         self.update()
         self.generate_page()
@@ -72,6 +134,9 @@ class DopelniaczeApp(ft.UserControl):
         if self.num_questions > 0:
             score_text += f' ({self.score / self.num_questions:.0%})'
         self.score_text.value = score_text
+
+    def open_wiktionary(self, event):
+        self.page.launch_url(f'https://pl.wiktionary.org/wiki/{self.title.value}')
 
     def generate_page(self, event=None):
         item = random.choice(data)
@@ -92,6 +157,6 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.ADAPTIVE
 
     # create app control and add it to the page
-    page.add(DopelniaczeApp())
+    page.add(DopelniaczeApp(page))
 
 ft.app(target=main, assets_dir="assets", view=ft.AppView.WEB_BROWSER)
