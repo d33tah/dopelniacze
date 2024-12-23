@@ -123,14 +123,13 @@ class DopelniaczeApp(ft.UserControl):
             self.error_message.value = f"Wystąpił błąd: {e}"
 
     def compare_answer(self, user, correct):
-
         if not bool(correct):
             return True
 
         user = user.strip().lower()
 
-        if '/' in correct:
-            possibilities = [c.strip().lower() for c in correct.split('/')]
+        if "/" in correct:
+            possibilities = [c.strip().lower() for c in correct.split("/")]
             return user in possibilities
 
         correct = correct.strip().lower()
